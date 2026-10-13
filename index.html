@@ -46,12 +46,22 @@ import * as THREE from 'three';
 const $=id=>document.getElementById(id);
 const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=0.95;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
 document.body.prepend(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8fd3ff);scene.fog=new THREE.Fog(0x8fd3ff,150,520);
 const cam=new THREE.PerspectiveCamera(70,1,0.5,800);
 function resize(){renderer.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.fov=innerWidth<innerHeight?85:68;cam.updateProjectionMatrix();}
 addEventListener('resize',resize);resize();
-scene.add(new THREE.HemisphereLight(0xffffff,0x335533,1.1));const sun=new THREE.DirectionalLight(0xffffff,1.2);sun.position.set(100,200,50);scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xcfeeff,0x2c5a6e,1.0));const sun=new THREE.DirectionalLight(0xfff2dd,2.0);sun.position.set(100,200,50);scene.add(sun);scene.add(sun.target);
+sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-28,right:28,top:28,bottom:-28,near:1,far:120});sun.shadow.bias=-0.0006;sun.shadow.normalBias=0.03;
+const SUNOFF=new THREE.Vector3(30,60,18);
+// cheap one-time sky environment for glossy reflections
+{const es=new THREE.Scene(),sg=new THREE.SphereGeometry(10,24,12),c=[],pa=sg.attributes.position,top=new THREE.Color(0x4aa3ff),hor=new THREE.Color(0xe8f6ff),bot=new THREE.Color(0x1c5f8c),tc=new THREE.Color();
+ for(let i=0;i<pa.count;i++){const y=pa.getY(i)/10;tc.copy(y>0?hor:bot).lerp(y>0?top:bot,Math.min(1,Math.abs(y)*(y>0?1.4:3)));c.push(tc.r,tc.g,tc.b);}
+ sg.setAttribute('color',new THREE.Float32BufferAttribute(c,3));es.add(new THREE.Mesh(sg,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.BackSide})));
+ const sd=new THREE.Mesh(new THREE.SphereGeometry(0.9,12,8),new THREE.MeshBasicMaterial({color:new THREE.Color(2.2,2.1,1.9)}));sd.position.set(5,7,3);es.add(sd);
+ const pm=new THREE.PMREMGenerator(renderer);scene.environment=pm.fromScene(es,0.02).texture;pm.dispose();}
 
 // ---- track ----
 const ctrl=[[0,0],[150,-40],[300,0],[380,120],[320,260],[180,240],[100,330],[-60,320],[-180,220],[-140,90]].map(p=>new THREE.Vector3(p[0],0,p[1]));
@@ -66,7 +76,7 @@ const M=8,WW=W+9,wg=new THREE.BufferGeometry(),wpos=new Float32Array(N*(M+1)*3),
 for(let i=0;i<N;i++)for(let j=0;j<=M;j++){const o=-WW+2*WW*j/M,k=(i*(M+1)+j);base.push(P[i].x+P[i].nx*o,P[i].z+P[i].nz*o);wpos[k*3]=base[k*2];wpos[k*3+2]=base[k*2+1];}
 const idx=[];for(let i=0;i<N;i++){const a=i*(M+1),b=((i+1)%N)*(M+1);for(let j=0;j<M;j++)idx.push(a+j,b+j,a+j+1,a+j+1,b+j,b+j+1);}
 wg.setAttribute('position',new THREE.BufferAttribute(wpos,3));wg.setIndex(idx);
-const water=new THREE.Mesh(wg,new THREE.MeshPhongMaterial({color:0x1e7fc8,specular:0x99ddff,shininess:60,flatShading:true,side:THREE.DoubleSide}));scene.add(water);
+const water=new THREE.Mesh(wg,new THREE.MeshPhongMaterial({color:0x1e7fc8,specular:0x99ddff,shininess:60,flatShading:true,side:THREE.DoubleSide}));water.receiveShadow=true;scene.add(water);
 // sand banks
 const sg=new THREE.BufferGeometry(),sp=[];for(let i=0;i<N;i++)for(const s of[-1,1])for(const o of[WW-1,WW+7])sp.push(P[i].x+P[i].nx*o*s,-0.9,P[i].z+P[i].nz*o*s);
 const si=[];for(let i=0;i<N;i++){const a=i*4,b=((i+1)%N)*4;for(const q of[0,2])si.push(a+q,b+q,a+q+1,a+q+1,b+q,b+q+1);}
@@ -94,19 +104,80 @@ const cans=[];const canG=new THREE.CylinderGeometry(0.9,0.9,2.2,10),canM=new THR
 for(let i=40;i<N;i+=55)for(const o of[-10,0,10]){if(Math.random()<.35)continue;const m=new THREE.Mesh(canG,canM);m.rotation.z=0.4;const x=P[i].x+P[i].nx*o,z=P[i].z+P[i].nz*o;m.position.set(x,1.5,z);scene.add(m);cans.push({m,x,z,t:0});}
 
 // ---- boats ----
-function makeBoat(col){const g=new THREE.Group(),mat=new THREE.MeshLambertMaterial({color:col});
- const hull=new THREE.Mesh(new THREE.BoxGeometry(2.6,1,6),mat);hull.position.y=0.4;g.add(hull);
- const nose=new THREE.Mesh(new THREE.ConeGeometry(1.84,3,4),mat);nose.rotation.set(Math.PI/2,Math.PI/4,0);nose.scale.set(1,1,0.55);nose.position.set(0,0.4,4.5);g.add(nose);
- const cab=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.8,1.8),new THREE.MeshLambertMaterial({color:0x223344}));cab.position.set(0,1.2,-0.3);g.add(cab);
- const fin=new THREE.Mesh(new THREE.BoxGeometry(2.8,0.2,0.8),new THREE.MeshLambertMaterial({color:0xffffff}));fin.position.set(0,1.6,-2.6);g.add(fin);
- const fl=new THREE.Mesh(new THREE.ConeGeometry(0.7,3,6),new THREE.MeshBasicMaterial({color:0x66eeff,transparent:true,opacity:.8}));fl.rotation.x=-Math.PI/2;fl.position.set(0,0.5,-4.4);fl.visible=false;g.add(fl);g.userData.flame=fl;
- const wk=new THREE.Mesh(new THREE.PlaneGeometry(3,7),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.5}));wk.rotation.x=-Math.PI/2;wk.position.set(0,0.05,-6);g.add(wk);g.userData.wake=wk;
+// procedural offshore powerboat hull: V-bottom, chines, stripe band, crowned deck, transom
+const HULL=(()=>{const ST=18,pos=[],ind=[],grp=[];const sec=[];
+ for(let i=0;i<=ST;i++){const t=Math.pow(i/ST,0.85),z=-3.3+t*7.3,f=t<0.55?1:Math.sqrt(Math.max(0,1-((t-0.55)/0.45)**2));
+  const yk=Math.max(0,t-0.5)**2*2.0,ws=1.3*f,wc=1.08*f,yc=0.34+yk*0.6,ys=1.0+t*0.22;
+  const co=[wc+0.1*f,yc+0.03],L=(u)=>[co[0]+(ws-co[0])*u,co[1]+(ys-co[1])*u];
+  const half=[[0,yk],[wc,yc],co,L(0.42),L(0.64),[ws,ys]];const deck=[];for(let k=0;k<=4;k++){const x=ws*(1-k/2);deck.push([x,ys+0.14*f*(1-(x/(ws||1))**2)]);}
+  sec.push({z,half,deck});}
+ function strip(get,n,mat,flip){const st=pos.length/3;for(const S of sec)for(let k=0;k<n;k++){const p=get(S,k);pos.push(p[0],p[1],S.z);}
+  for(let i=0;i<ST;i++)for(let k=0;k<n-1;k++){const a=st+i*n+k,b=a+n,c=a+1,d=b+1;flip?ind.push(a,c,b,c,d,b):ind.push(a,b,c,c,b,d);}return [st,n];}
+ function add(fn,mat){const s0=ind.length;fn();grp.push([s0,ind.length-s0,mat]);}
+ const bands=[[0,1,0],[1,2,0],[2,3,1],[3,4,2],[4,5,1]];
+ for(const [p,q,m] of bands)for(const sd of[1,-1])add(()=>strip((S,k)=>{const v=S.half[k?q:p];return[v[0]*sd,v[1]]},2,m,sd>0),m);
+ add(()=>strip((S,k)=>S.deck[k],5,3,true),3);
+ add(()=>{const S=sec[0],c0=pos.length/3;pos.push(0,0.55,S.z);const ring=[...S.half.map(v=>[v[0],v[1]]),...S.deck.slice(1,4),...S.half.slice().reverse().map(v=>[-v[0],v[1]])];
+  const r0=pos.length/3;for(const v of ring)pos.push(v[0],v[1],S.z);for(let k=0;k<ring.length-1;k++)ind.push(c0,r0+k+1,r0+k);},1);
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(ind);for(const [a,c,m] of grp)g.addGroup(a,c,m);g.computeVertexNormals();return g;})();
+const glassM=new THREE.MeshStandardMaterial({color:0x1a2a33,metalness:0.6,roughness:0.04,transparent:true,opacity:0.45,envMapIntensity:1.5,side:THREE.DoubleSide});
+const chromeM=new THREE.MeshStandardMaterial({color:0xffffff,metalness:1,roughness:0.12});
+const darkM=new THREE.MeshStandardMaterial({color:0x22262b,metalness:0.2,roughness:0.6});
+const seatM=new THREE.MeshStandardMaterial({color:0xf2efe8,roughness:0.5});
+const suitM=new THREE.MeshStandardMaterial({color:0x1b1f2a,roughness:0.7});
+const visorM=new THREE.MeshStandardMaterial({color:0x111111,metalness:0.9,roughness:0.05});
+const G={cock:new THREE.BoxGeometry(1.4,0.4,2.0),seat:new THREE.BoxGeometry(0.6,0.5,0.6),back:new THREE.BoxGeometry(0.6,0.7,0.15),
+ shield:new THREE.CylinderGeometry(1.0,1.15,0.6,16,1,true,-1.0,2.0),rail:new THREE.TorusGeometry(1.0,0.035,6,16,2.0),
+ cowl:new THREE.BoxGeometry(0.55,0.7,0.75),leg:new THREE.BoxGeometry(0.16,0.9,0.3),prop:new THREE.CylinderGeometry(0.12,0.12,0.25,8),
+ torso:new THREE.CapsuleGeometry(0.26,0.45,4,8),helmet:new THREE.SphereGeometry(0.24,14,10),visor:new THREE.SphereGeometry(0.245,14,8,-0.9,1.8,1.1,0.8),
+ fin:new THREE.BoxGeometry(0.08,0.45,0.9),wing:new THREE.BoxGeometry(2.3,0.07,0.5)};
+function makeBoat(col,stripe){const g=new THREE.Group(),body=new THREE.Group();g.add(body);
+ const paint=new THREE.MeshPhysicalMaterial({color:col,metalness:0.05,roughness:0.4,clearcoat:0.7,clearcoatRoughness:0.08,envMapIntensity:0.8});
+ const strM=new THREE.MeshPhysicalMaterial({color:stripe,metalness:0.05,roughness:0.4,clearcoat:0.7,clearcoatRoughness:0.1,envMapIntensity:0.8});
+ const botM=new THREE.MeshStandardMaterial({color:0xdedcd6,roughness:0.45,envMapIntensity:0.4});const deckM=new THREE.MeshPhysicalMaterial({color:new THREE.Color(col).lerp(new THREE.Color(0xffffff),0.15),roughness:0.4,clearcoat:0.6,envMapIntensity:0.8});
+ const add=(geo,m,x,y,z,rx=0,ry=0,rz=0,par=body)=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.rotation.set(rx,ry,rz);o.castShadow=true;par.add(o);return o;};
+ const hull=add(HULL,[botM,paint,strM,deckM],0,0,0);hull.receiveShadow=true;
+ add(G.cock,darkM,0,1.02,-1.05);for(const x of[-0.38,0.38]){add(G.seat,seatM,x,1.3,-1.25);add(G.back,seatM,x,1.6,-1.6,-0.15);}
+ add(G.shield,glassM,0,1.45,-0.75,-0.35,0,0).castShadow=false;add(G.rail,chromeM,0,1.7,-0.85,Math.PI/2+0.35,0,Math.PI/2-1.0).rotation.order='XYZ';
+ for(const x of[-0.42,0.42]){add(G.cowl,darkM,x,1.25,-3.55);const st=add(new THREE.BoxGeometry(0.56,0.12,0.76),strM,x,1.5,-3.55);add(G.leg,chromeM,x,0.55,-3.6);add(G.prop,chromeM,x,0.15,-3.75,Math.PI/2);}
+ add(G.fin,strM,0.9,1.55,-2.9);add(G.fin,strM,-0.9,1.55,-2.9);add(G.wing,strM,0,1.8,-2.95);
+ const drv=new THREE.Group();drv.position.set(-0.38,1.5,-1.2);body.add(drv);add(G.torso,suitM,0,0.32,0,-0.15,0,0,drv);
+ add(G.helmet,paint,0,0.92,0.05,0,0,0,drv);add(G.visor,visorM,0,0.92,0.06,0,0,0,drv);
+ const fl=new THREE.Mesh(new THREE.ConeGeometry(0.35,2.2,6),new THREE.MeshBasicMaterial({color:0x66eeff,transparent:true,opacity:.8}));fl.rotation.x=-Math.PI/2;fl.position.set(0,0.5,-4.8);fl.visible=false;body.add(fl);g.userData.flame=fl;
+ g.userData.wake={visible:false,scale:{y:1}};g.userData.body=body;
  scene.add(g);return g;}
-const NAMES=['YOU','Saltjaw','Coral Fang','Gale Dart'],COLS=[0xffd21f,0xe23b3b,0x2bd16b,0xb046ff];
+// ---- effects: instanced foam wake + point spray (additive, fade via color) ----
+const softTex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d'),gr=x.createRadialGradient(32,32,0,32,32,32);
+ gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.5,'rgba(255,255,255,0.55)');gr.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=gr;x.fillRect(0,0,64,64);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;})();
+const FOAMN=360,foam=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({map:softTex,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,fog:true}),FOAMN);
+foam.frustumCulled=false;foam.renderOrder=2;const FP=[];const fm=new THREE.Matrix4(),fq=new THREE.Quaternion(),fs=new THREE.Vector3(),fv=new THREE.Vector3(),fc=new THREE.Color(),UP=new THREE.Vector3(0,1,0);
+for(let i=0;i<FOAMN;i++){FP.push({life:0,max:1,x:0,z:0,vx:0,vz:0,sz:1,gr:1,a:0,r:0});foam.setColorAt(i,fc.setRGB(0,0,0));fm.makeScale(0,0,0);foam.setMatrixAt(i,fm);}scene.add(foam);let fi=0;
+function emitFoam(x,z,vx,vz,sz,gr,life,a){const p=FP[fi];fi=(fi+1)%FOAMN;Object.assign(p,{x,z,vx,vz,sz,gr,life,max:life,a,r:Math.random()*6});}
+const SPN=500,spPos=new Float32Array(SPN*3),spCol=new Float32Array(SPN*3),SP=[];for(let i=0;i<SPN;i++){SP.push({life:0,max:1,vx:0,vy:0,vz:0});spPos[i*3+1]=-99;}
+const spG=new THREE.BufferGeometry();spG.setAttribute('position',new THREE.BufferAttribute(spPos,3));spG.setAttribute('color',new THREE.BufferAttribute(spCol,3));
+const spray=new THREE.Points(spG,new THREE.PointsMaterial({size:0.55,map:softTex,vertexColors:true,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,sizeAttenuation:true}));spray.frustumCulled=false;spray.renderOrder=3;scene.add(spray);let si2=0;
+function emitSpray(x,y,z,vx,vy,vz,life){const i=si2;si2=(si2+1)%SPN;const p=SP[i];p.life=p.max=life;p.vx=vx;p.vy=vy;p.vz=vz;spPos[i*3]=x;spPos[i*3+1]=y;spPos[i*3+2]=z;}
+function boatFX(b,dt,t){const fx=Math.sin(b.h),fz=Math.cos(b.h),rx=-fz,rz=fx,sp=b.s;
+ if(b.landed){b.landed=false;const n=Math.min(70,20+b.impact*6|0);for(let k=0;k<n;k++){const a=Math.random()*6.283,r=1+Math.random()*1.5,v=3+Math.random()*5;emitSpray(b.x+Math.cos(a)*r,b.y+0.3,b.z+Math.sin(a)*r,Math.cos(a)*v+b.vx*0.3,4+Math.random()*b.impact*0.9,Math.sin(a)*v+b.vz*0.3,0.7+Math.random()*0.5);}
+  for(let k=0;k<6;k++){const a=k*1.047;emitFoam(b.x+Math.cos(a)*1.5,b.z+Math.sin(a)*1.5,Math.cos(a)*3,Math.sin(a)*3,2.5,3,1.6,0.9);}}
+ if(b.air||sp<3)return;
+ b.ft=(b.ft||0)-dt;if(b.ft<=0){b.ft=0.045;const k=Math.min(1,sp/MAXS),sx=b.x-fx*3.9,sz=b.z-fz*3.9;
+  emitFoam(sx,sz,b.vx*0.15,b.vz*0.15,1.6+k*1.2,2.2,1.4+k*1.4,0.55+k*0.35);
+  for(const sd of[-1,1])emitFoam(b.x-fx*1.2+rx*sd*1.3,b.z-fz*1.2+rz*sd*1.3,rx*sd*(1.5+k*2.5)+b.vx*0.05,rz*sd*(1.5+k*2.5)+b.vz*0.05,0.9+k*0.6,1.8,1.6+k,0.35+k*0.25);}
+ const rate=(sp/MAXS)*(b.bo?60:30)*dt+(Math.random()<0.5?0:0);let n=rate|0;if(Math.random()<rate-n)n++;
+ for(let k=0;k<n;k++){const sd=Math.random()<.5?-1:1,o=1.6+Math.random()*1.2,v=2+Math.random()*3+sp*0.05;emitSpray(b.x+fx*o+rx*sd*0.9,b.y+0.35,b.z+fz*o+rz*sd*0.9,rx*sd*v+b.vx*0.6,2+Math.random()*2.5+sp*0.03,rz*sd*v+b.vz*0.6,0.45+Math.random()*0.35);}}
+function fxUpdate(dt,t){for(let i=0;i<FOAMN;i++){const p=FP[i];if(p.life<=0){if(p.a){p.a=0;fm.makeScale(0,0,0);foam.setMatrixAt(i,fm);}continue;}
+  p.life-=dt;const u=1-p.life/p.max;p.x+=p.vx*dt;p.z+=p.vz*dt;p.vx*=1-dt*1.5;p.vz*=1-dt*1.5;const s=p.sz*(1+u*p.gr);
+  fq.setFromAxisAngle(UP,p.r);fm.compose(fv.set(p.x,wave(p.x,p.z,t)*0.6+0.06,p.z),fq,fs.set(s,1,s));foam.setMatrixAt(i,fm);const c=p.a*Math.max(0,1-u)*Math.min(1,u*8+0.3);foam.setColorAt(i,fc.setRGB(c*0.9,c*0.95,c));}
+ foam.instanceMatrix.needsUpdate=true;foam.instanceColor.needsUpdate=true;
+ for(let i=0;i<SPN;i++){const p=SP[i];if(p.life<=0){if(spCol[i*3]){spCol[i*3]=spCol[i*3+1]=spCol[i*3+2]=0;spPos[i*3+1]=-99;}continue;}
+  p.life-=dt;p.vy-=14*dt;spPos[i*3]+=p.vx*dt;spPos[i*3+1]+=p.vy*dt;spPos[i*3+2]+=p.vz*dt;const c=Math.max(0,p.life/p.max)*0.85;spCol[i*3]=c*0.92;spCol[i*3+1]=c*0.97;spCol[i*3+2]=c;}
+ spG.attributes.position.needsUpdate=true;spG.attributes.color.needsUpdate=true;}
+const NAMES=['YOU','Saltjaw','Coral Fang','Gale Dart'],COLS=[0xffc61a,0xd8202a,0x10a35a,0x1e4fd8],STRIPES=[0x111111,0xffffff,0xf2f2f2,0xff7a00];
 let boats=[];
 function reset(){boats.forEach(b=>scene.remove(b.g));boats=[];
  for(let k=0;k<4;k++){const i=N-8-Math.floor(k/2)*10,o=(k%2?6:-6),p=P[i];
-  boats.push({g:makeBoat(COLS[k]),name:NAMES[k],ai:k>0,x:p.x+p.nx*o,z:p.z+p.nz*o,y:0,vy:0,air:false,h:p.h,s:0,boost:k?30:40,bo:false,idx:i,lap:0,fin:0,lane:(Math.random()-.5)*20,skill:0.9+k*0.025,tilt:0,pitch:0});}
+  boats.push({g:makeBoat(COLS[k],STRIPES[k]),name:NAMES[k],ai:k>0,x:p.x+p.nx*o,z:p.z+p.nz*o,y:0,vy:0,air:false,h:p.h,s:0,boost:k?30:40,bo:false,idx:i,lap:0,fin:0,lane:(Math.random()-.5)*20,skill:0.9+k*0.025,tilt:0,pitch:0,roll:0,vx:0,vz:0,ps:0,acc:0,ph:Math.random()*6,impact:0,landed:false,sy:0,svy:0});}
  cans.forEach(c=>{c.t=0;c.m.visible=true});}
 const MAXS=62,BOOSTS=92;
 function nearest(b){let best=1e9,bi=b.idx;for(let d=-15;d<=25;d++){const i=(b.idx+d+N)%N,dx=b.x-P[i].x,dz=b.z-P[i].z,q=dx*dx+dz*dz;if(q<best){best=q;bi=i}}return bi;}
@@ -114,17 +185,25 @@ function step(b,steer,throttle,wantBoost,dt,t){
  const boosting=wantBoost&&b.boost>0&&state==='race';b.bo=boosting;if(boosting)b.boost=Math.max(0,b.boost-28*dt);
  const top=(boosting?BOOSTS:MAXS)*(b.ai?b.skill:1);
  if(throttle>0)b.s+=(b.s<top?(boosting?45:24):-30)*dt;else if(throttle<0)b.s-=40*dt;else b.s-=8*dt;b.s=Math.max(0,b.s);
- const turn=(b.air?0.6:1.9)*Math.min(1,b.s/12+0.15);b.h-=steer*turn*dt;b.tilt+=(steer*0.35-b.tilt)*Math.min(1,dt*6);
- b.x+=Math.sin(b.h)*b.s*dt;b.z+=Math.cos(b.h)*b.s*dt;
+ const turn=(b.air?0.6:1.9)*Math.min(1,b.s/12+0.15);b.h-=steer*turn*dt;b.tilt+=(steer*(0.12+0.26*Math.min(1,b.s/MAXS))-b.tilt)*Math.min(1,dt*4);
+ b.acc+=(((b.s-b.ps)/Math.max(dt,1e-3))-b.acc)*Math.min(1,dt*4);b.ps=b.s;
+ // momentum + drift: velocity eases toward heading (less grip when fast/boosting/airborne)
+ const grip=b.air?0.15:(3.6-1.6*Math.min(1,b.s/BOOSTS)-(boosting?0.5:0)),dvx=Math.sin(b.h)*b.s,dvz=Math.cos(b.h)*b.s,gk=Math.min(1,grip*dt);
+ b.vx+=(dvx-b.vx)*gk;b.vz+=(dvz-b.vz)*gk;b.x+=b.vx*dt;b.z+=b.vz*dt;
  const pi=b.idx;b.idx=nearest(b);const p=P[b.idx];let off=(b.x-p.x)*p.nx+(b.z-p.z)*p.nz;
- if(Math.abs(off)>W){const s=Math.sign(off);b.x-=p.nx*(off-s*W);b.z-=p.nz*(off-s*W);b.s*=0.985;let dh=p.h-b.h;dh=Math.atan2(Math.sin(dh),Math.cos(dh));b.h+=dh*0.08;}
+ if(Math.abs(off)>W){const s=Math.sign(off);b.x-=p.nx*(off-s*W);b.z-=p.nz*(off-s*W);b.s*=0.985;b.vx*=0.97;b.vz*=0.97;let dh=p.h-b.h;dh=Math.atan2(Math.sin(dh),Math.cos(dh));b.h+=dh*0.08;}
  if(pi>N*0.8&&b.idx<N*0.2)b.lap++;else if(pi<N*0.2&&b.idx>N*0.8)b.lap--;
  const wy=wave(b.x,b.z,t)*0.6;
  if(!b.air){for(const r of RAMPS){const d=(b.idx-r+N)%N;if(d<=3&&Math.abs(off)<6.5&&b.s>15){b.air=true;b.vy=7+b.s*0.17;b.y=wy+1;if(!b.ai){toast('BIG AIR!');sfx(300,0.15)}}}}
- if(b.air){b.y+=b.vy*dt;b.vy-=24*dt;b.pitch=Math.max(-0.4,Math.min(0.35,-b.vy*0.03));if(b.y<=wy){b.air=false;b.y=wy;if(!b.ai){b.boost=Math.min(100,b.boost+8);sfx(90,0.2)}}}
- else{b.y+=(wy-b.y)*Math.min(1,dt*10);b.pitch=-(wave(b.x+Math.sin(b.h)*3,b.z+Math.cos(b.h)*3,t)-wave(b.x,b.z,t))*0.15-b.s*0.0015;}
+ if(b.air){b.y+=b.vy*dt;b.vy-=24*dt;b.pitch=Math.max(-0.4,Math.min(0.35,-b.vy*0.03));if(b.y<=wy){b.air=false;b.impact=-b.vy;b.landed=true;b.svy=b.vy*0.12;b.y=wy;if(!b.ai){b.boost=Math.min(100,b.boost+8);sfx(90,0.2)}}}
+ else{b.y+=(wy-b.y)*Math.min(1,dt*10);const w0=wave(b.x,b.z,t),fh=Math.sin(b.h),ch=Math.cos(b.h);
+  const slope=(wave(b.x+fh*3,b.z+ch*3,t)-wave(b.x-fh*3,b.z-ch*3,t))/6,lat=(wave(b.x+ch*1.5,b.z-fh*1.5,t)-wave(b.x-ch*1.5,b.z+fh*1.5,t))/3;
+  const hump=0.1*Math.exp(-(((b.s-20)/13)**2)),accP=Math.max(-0.05,Math.min(0.09,b.acc*0.004)),planing=0.025*Math.min(1,b.s/30);
+  const tp=-slope*0.55-hump-accP-planing;b.pitch+=(tp-b.pitch)*Math.min(1,dt*5);b.roll+=(lat*0.5-b.roll)*Math.min(1,dt*4);}
+ // landing spring + idle bob
+ b.svy+=(-b.sy*60-b.svy*7)*dt;b.sy+=b.svy*dt;const bob=b.air?0:Math.sin(t*2.3+b.ph)*0.06*(1-Math.min(1,b.s/40))+Math.sin(t*5.1+b.ph)*0.02;
  for(const c of cans)if(c.m.visible&&!b.air){const dx=b.x-c.x,dz=b.z-c.z;if(dx*dx+dz*dz<12){c.m.visible=false;c.t=6;b.boost=Math.min(100,b.boost+35);if(!b.ai){toast('+BOOST');sfx(880,0.12)}}}
- b.g.position.set(b.x,b.y+0.3,b.z);b.g.rotation.set(b.pitch,b.h,b.tilt,'YXZ');b.g.userData.flame.visible=boosting;b.g.userData.wake.visible=!b.air&&b.s>8;b.g.userData.wake.scale.y=0.5+b.s/MAXS;
+ b.g.position.set(b.x,b.y-0.15+b.sy+bob+(b.air?0:Math.min(0.2,b.s*0.004)),b.z);b.g.rotation.set(b.pitch-b.sy*0.3,b.h,b.tilt+b.roll+(b.air?0:Math.sin(t*1.7+b.ph)*0.025),'YXZ');b.g.userData.flame.visible=boosting;b.g.userData.wake.visible=!b.air&&b.s>8;b.g.userData.wake.scale.y=0.5+b.s/MAXS;
 }
 // ---- input ----
 const keys={};addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault()});addEventListener('keyup',e=>keys[e.code]=false);
@@ -180,12 +259,14 @@ function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),1
   const gap=prog(me)-prog(b);b.skill=Math.max(0.82,Math.min(1.08,0.93+gap*0.0006+(boats.indexOf(b)*0.012)));
   const wantB=b.boost>20&&(gap>30||Math.random()<0.01)&&Math.abs(dh)<0.3||b.bo&&b.boost>0;
   step(b,live?Math.max(-1,Math.min(1,-dh*3)):0,live?1:0,live&&wantB,dt,wt);}
+ for(const b of boats)boatFX(b,dt,wt);fxUpdate(dt,wt);
  // collisions
  for(let i=0;i<4;i++)for(let j=i+1;j<4;j++){const a=boats[i],c=boats[j],dx=c.x-a.x,dz=c.z-a.z,d=Math.hypot(dx,dz);if(d<3.5&&d>0.01&&Math.abs(a.y-c.y)<2){const p=(3.5-d)/2/d;a.x-=dx*p;a.z-=dz*p;c.x+=dx*p;c.z+=dz*p;a.s*=0.995;c.s*=0.995;}}
  for(const b of boats)if(!b.fin&&b.lap>3&&state!=='count'&&state!=='menu'){b.fin=raceT;finishOrder.push(b);if(!b.ai){state='done';$('msg').textContent='FINISH!';sfx(660,0.6);setTimeout(()=>{if(state==='done'){state='over';showEnd();}},2500);}}
  // camera
  const fx=Math.sin(me.h),fz=Math.cos(me.h),back=me.bo?16:13;
  cam.position.lerp(new THREE.Vector3(me.x-fx*back,me.y+6,me.z-fz*back),Math.min(1,dt*6));cam.lookAt(me.x+fx*10,me.y+1.5,me.z+fz*10);
+ if(window.__rr&&__rr.camHook)__rr.camHook(cam,me);sun.position.copy(me.g.position).add(SUNOFF);sun.target.position.copy(me.g.position);
  cam.fov+=((innerWidth<innerHeight?85:68)+(me.bo?10:0)-cam.fov)*Math.min(1,dt*3);cam.updateProjectionMatrix();
  // HUD
  if(frame%3===0){const sorted=[...boats].sort((a,b)=>(b.fin?1e9-b.fin:prog(b))-(a.fin?1e9-a.fin:prog(a)));
